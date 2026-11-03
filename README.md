@@ -1,4 +1,4 @@
-# ASCII Sharks — 海洋背景
+# dsh-ascii-sharks
 
 ## 来源与许可 / Attribution
 
@@ -6,63 +6,68 @@
 
 This project is derived from [stackedlol/ascii-sharks](https://github.com/stackedlol/ascii-sharks.git). The original Git history, copyright notice, and MIT license are preserved.
 
-当前版本在原有 ASCII 鲨鱼与鱼群效果基础上，增加座头鲸、蓝鲸，以及用于 DeepSeek Harness (DSH) 的海洋背景插件；支持浅色/深色主题、后台暂停和减少动态效果偏好。
+## 专门用于 DSH 的 ASCII 鲨鱼背景
 
-```
-                            ;'
-                             %%'
-                              .t;.               .oooo
-                               S;:S%              %8S8.
-                                ;:tt%t '..        XX%%S
-t'                            ''XSSS8SSX%XX8#.    %XSX%
- :;'               ;.''X8%8XX%%S%%S%SStt%tSX8S#X8't%ttt.
-  ::%'       ''8XXXSSt%Stttttt%8@%%@%8@8%Sttt%%%%SSSSS%tt.
-  'SXXtt%t%%%S%:;StS%ttSS%tSXSt88@@%8%@8%tStS%%X%SS%%S%;;t
- .@##88#@...'@@@@#@8@88X88#XXXSX8SX88SX8%SS%S%%S88St%t%%%.
-  %;%t             :.    '.'##@###@X#888XX##8@@@#.X%XS%.
- .%t                            ;%%%#@@##@@@.     SXS%%
- t.                            .%;%%%.            %%XXS
-                              '%t:t              .SXSS'
-                             '::.                ooooo
-                            .S'
-                            .
-```
+为 **DeepSeek Harness（DSH）Web 界面**添加持续游动的 ASCII 鲨鱼背景。鲨鱼、鱼群、座头鲸和蓝鲸在界面底层缓慢游动，保留聊天输入框、菜单和侧栏的原有表面与操作方式。
 
-Fish, sharks, humpback whales and blue whales drawn as ASCII on a canvas. Zero runtime dependencies.
+### DSH 实机演示
+
+下方 GIF 录制自已加载此插件的真实 DSH 页面，展示浅色和深色效果。录制时收起侧栏，在空白新会话首页展示背景。
+
+![DSH 中运行的 ASCII 鲨鱼背景：浅色与深色演示](docs/demo/dsh-ascii-sharks.gif)
+
+<details>
+<summary>静态预览（不播放动画）</summary>
+
+![DSH ASCII 鲨鱼背景静态预览](docs/demo/dsh-ascii-sharks.png)
+
+</details>
+
+### 背景效果
+
+- 默认包含四条鲨鱼、一条座头鲸、一条蓝鲸和小鱼群。
+- 浅色主题使用淡灰色轮廓，深色主题使用低亮度蓝灰色，适合作为界面底层背景。
+- 背景不接收鼠标和触摸事件，输入框、按钮、菜单和侧栏照常使用。
+- 渲染上限为 30 fps、DPR 1；页面隐藏时暂停，遵循系统的“减少动态效果”偏好。
+- 通过独立 DSH 插件加载，卸载时清理画布、样式、动画和主题覆盖。
+
+## 安装到 DSH
+
+需要支持 Web 客户端插件和主题服务的 DSH 环境。仓库已包含构建好的背景产物，首次安装可直接加载。
 
 ```sh
-npm install && npm run dev
+git clone https://github.com/A-Lucious/dsh-ascii-sharks.git
+cd dsh-ascii-sharks
 ```
 
-```ts
-import { OceanEngine } from "./src";
+在 DSH Web 配置补丁（通常为 `~/.dsh/profiles/web/cordis.patch.yml`）的顶层补丁列表中加入以下条目。将 `/absolute/path/to/dsh-ascii-sharks` 替换为本仓库的实际绝对路径：
 
-const engine = new OceanEngine(canvas, [{ kind: "hammerhead", size: 1 }]);
+```yaml
+- insert:
+    - id: ascii-ocean-background
+      name: /absolute/path/to/dsh-ascii-sharks/dsh-background/host.js
+      disabled: false
 ```
 
-The demo starts with the original four sharks plus a humpback and a blue whale, with no navigation buttons. Optional URL parameters still select the mixed ocean, original sharks, or either whale on its own:
+让 DSH 重新加载插件配置，再刷新现有 DSH 页面。背景随 DSH 客户端加载，无需运行 Vite 演示服务。
 
-- `?scene=mixed` — four sharks and both whales.
-- `?scene=sharks` — the original four-shark scene.
-- `?scene=humpback` — long pale flippers, a broad notched fluke and a knobbly head.
-- `?scene=bluewhale` — a longer slate-blue body, mottled skin and short swept flippers.
+### 关闭背景
 
-Existing `?sharks=hammerhead,mako,nurse` links still work. Both `humpback` and `bluewhale` can also appear in this list.
+将上面的 `disabled` 改为 `true`，或移除该条目，然后重新加载配置。插件卸载后恢复原有基础背景，保留用户的主题偏好。
 
-```ts
-const engine = new OceanEngine(canvas, [
-  { kind: "classic", size: 1 },
-  { kind: "humpback", size: 1.35 },
-  { kind: "bluewhale", size: 1.65 },
-]);
+## 修改与构建
 
-// Clean up observers, input listeners and animation when unmounting.
-engine.destroy();
+背景入口是 [`dsh-background/client.ts`](dsh-background/client.ts)。默认动物种类与大小在 `RESIDENTS` 中配置，浅色、深色与窄屏透明度在同文件的 CSS 中调整。共享动画引擎位于 [`src/`](src/)。
+
+```sh
+npm ci
+npm exec -- tsc --noEmit -p dsh-background/tsconfig.json
+node scripts/build-dsh-background.mjs
 ```
 
-Whales cruise slowly with wider turns and a vertical tail beat represented by subtle foreshortening from above. They do not inherit shark pursuit or single-fish feeding. The library's no-argument roster remains the original four sharks; the mixed roster belongs to the demo. `SharkSpec` accepts both sharks and whales; `OceanKind` and `WhaleKind` are also exported. Give the canvas a CSS width, height and monospace font.
+构建会更新 `dsh-background/client.js`。更新已加载的插件后，需要让 DSH Host 重新读取客户端产物，再刷新页面；可使用 DSH 的重建通知机制，或重启对应 Host。仅刷新浏览器不会让 Host 重新读取已缓存的旧产物。
 
-Verification:
+### 本地验证
 
 ```sh
 npm run typecheck
@@ -70,28 +75,10 @@ npm run build
 node scripts/verify-whales.mjs
 ```
 
-The simulation check runs all ten species for 60 simulated seconds each and checks whale behavior and viewport resizing. Browser screenshots and interaction verification are saved in `artifacts/` during local development.
+模拟检查覆盖八种鲨鱼、两种鲸鱼以及窄屏缩放。需要在本地独立查看动画时，可运行 `npm run dev`；这只是开发预览入口，DSH 背景本身无需依赖它。
 
-DSH background:
+[`scripts/verify-dsh-background.mjs`](scripts/verify-dsh-background.mjs) 提供面向本地 DSH 环境的集成验证参考，需要按本机地址、认证方式和界面内容配置。
 
-```sh
-npm exec -- tsc --noEmit -p dsh-background/tsconfig.json
-node scripts/build-dsh-background.mjs
-```
+## 许可
 
-`dsh-background/` is a self-contained DSH browser plugin built from the same ocean engine. It draws four sharks, a humpback and a blue whale behind the interface, without random accent glyph colors or scene buttons. Light mode uses pale monochrome silhouettes; dark mode retains dim blue-grey species tints. Inputs, cards, menus and side panels retain their own surfaces and the user's existing theme preference. The background is inert, registers no pointer handlers, caps rendering at 30 fps and DPR 1, pauses when the document is hidden, and respects reduced-motion preferences.
-
-To enable it, add the following entry under `plugins` in your DSH Web profile's `cordis.patch.yml` (usually `~/.dsh/profiles/web/cordis.patch.yml`). Replace `/absolute/path/to/ascii-sharks` with your checkout path:
-
-```yaml
-- insert:
-    - id: ascii-ocean-background
-      name: /absolute/path/to/ascii-sharks/dsh-background/host.js
-      disabled: false
-```
-
-Set `disabled: true` or remove that entry to unload the plugin and restore the original base background. It needs neither the demo server nor a replacement DSH server. Reload the existing DSH page after deployment. For later rebuilds of an already loaded bundle, notify DSH's rebuild hook or reload the Host before refreshing, because the Host snapshots client artifacts. A full DSH source checkout can drive that hook with its `dev:web` watcher. There is no such watcher in this installed npm runtime; the initial activation here loads the already-built bundle.
-
-`node scripts/verify-dsh-background.mjs` checks the current DSH at `http://127.0.0.1:3080/`. Provide `PLAYWRIGHT_MODULE` when Playwright is outside the project and either `DSH_BROWSER_STORAGE_STATE` or `DSH_BROWSER_AUTH_HELPER` for a locally authenticated test context. The helper exports `authorize(browserContext)`; credentials are used only in memory and are never logged or stored in verification artifacts. Verification must open the real DSH page without injecting the background so it tests the installed plugin, plus a separate isolated context for teardown.
-
-MIT
+[MIT](LICENSE)。使用、修改或分发时请保留原许可证和版权声明。
