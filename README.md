@@ -23,6 +23,19 @@ This project is derived from [stackedlol/ascii-sharks](https://github.com/stacke
 
 </details>
 
+### 输入后的会话演示
+
+在真实 DSH 中输入并发送一条演示消息，收到回复后，ASCII 鲨鱼背景继续在会话页底层游动。下方 GIF 由实际输入和回复后的浅色、深色界面录屏剪辑而成，略去了等待回复的时间。
+
+![DSH 输入消息与回复后的 ASCII 鲨鱼背景演示](docs/demo/dsh-ascii-sharks-chat.gif)
+
+<details>
+<summary>会话页静态预览（不播放动画）</summary>
+
+![DSH 回复后的 ASCII 鲨鱼背景静态预览](docs/demo/dsh-ascii-sharks-chat.png)
+
+</details>
+
 ### 背景效果
 
 - 默认包含四条鲨鱼、一条座头鲸、一条蓝鲸和小鱼群。
