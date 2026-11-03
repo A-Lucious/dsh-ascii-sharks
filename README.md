@@ -12,8 +12,6 @@ This project is derived from [stackedlol/ascii-sharks](https://github.com/stacke
 
 ### DSH 实机演示
 
-下方 GIF 录制自已加载此插件的真实 DSH 页面，展示浅色和深色效果。录制时收起侧栏，在空白新会话首页展示背景。
-
 ![DSH 中运行的 ASCII 鲨鱼背景：浅色与深色演示](docs/demo/dsh-ascii-sharks.gif)
 
 <details>
@@ -24,8 +22,6 @@ This project is derived from [stackedlol/ascii-sharks](https://github.com/stacke
 </details>
 
 ### 输入后的会话演示
-
-在真实 DSH 中输入并发送一条演示消息，收到回复后，ASCII 鲨鱼背景继续在会话页底层游动。下方 GIF 由实际输入和回复后的浅色、深色界面录屏剪辑而成，略去了等待回复的时间。
 
 ![DSH 输入消息与回复后的 ASCII 鲨鱼背景演示](docs/demo/dsh-ascii-sharks-chat.gif)
 
