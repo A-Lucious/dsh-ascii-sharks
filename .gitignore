@@ -1,3 +1,15 @@
 node_modules
 dist
 .DS_Store
+
+# Local engineering state and verification output
+.dsh/
+AGENTS.md
+artifacts/
+
+# Credentials and local browser authentication
+.env
+.env.*
+!.env.example
+*storage-state*.json
+*storageState*.json

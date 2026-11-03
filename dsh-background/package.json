@@ -1,0 +1,21 @@
+{
+  "name": "dsh-ascii-ocean-background",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Quiet ASCII sharks and whales behind the DSH interface",
+  "type": "module",
+  "main": "./host.js",
+  "license": "MIT",
+  "exports": {
+    ".": "./host.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "client": {
+      "platform": "web",
+      "inject": ["@deepseek-ai/dsh-client-ui-theme"]
+    }
+  }
+}

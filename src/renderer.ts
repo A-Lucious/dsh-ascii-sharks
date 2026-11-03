@@ -4,10 +4,10 @@
  *   2. a wake field that diffuses where things swim, lighting the dots cyan
  *   3. fish as minimal ASCII dashes, one per cell, glinting on hard turns
  *   4. sharks rasterised cell-by-cell with supersampled edges: grey blocks
- *      shaded by the light, dense glyphs, and shimmering accent colours
+ *      shaded by the light, dense glyphs, and consistent species tints
  */
 import { clamp, hash3, smoothstep } from "./math";
-import { SHARK_NODES, type Shark, type SharkKind, type World } from "./world";
+import { SHARK_NODES, type Shark, type OceanKind, type World } from "./world";
 
 const ALPHA_LEVELS = 6;
 const FISH_ALPHAS = [0.28, 0.42, 0.58, 0.74, 0.9];
@@ -22,8 +22,6 @@ const DOT_RGB: [number, number, number][] = [
 ];
 const DOT_BASE_ALPHA = [1, 1, 1, 1, 1];
 const WAKE = DOT_RGB.length - 1;
-
-const ACCENTS = ["#e0892c", "#e03a32", "#b44ae0", "#33c8cc", "#3cb54a", "#3150e8", "#d9c14a"];
 
 // Sparse glyphs on bright skin, dense glyphs in shadow, so the texture
 // reinforces the shading instead of fighting it.
@@ -41,6 +39,7 @@ const FLAG_RIDGE = 4;
 const FLAG_EYE = 5;
 /** Dark skin markings: tiger bars, zebra-shark spots. */
 const FLAG_MARK = 6;
+const FLAG_PALE = 7;
 const MARK_GLYPHS = "#%@";
 
 // Sub-cell sample offsets for anti-aliased silhouettes.
@@ -78,9 +77,11 @@ interface SharkShape {
   gills: [number, number];
   /** Skin colour multipliers (r, g, b). */
   tint: [number, number, number];
+  /** Baleen whales use rounded flippers and broad notched horizontal flukes. */
+  whale?: { flukeSpan: number; flipperWidth: number; paleFlippers: boolean };
 }
 
-const SHAPES: Record<SharkKind, SharkShape> = {
+const SHAPES: Record<OceanKind, SharkShape> = {
   classic: {
     halfWidth: classicHalfWidth,
     pectoral: [0.15, 0.43, 0.55, 0.26],
@@ -231,9 +232,47 @@ const SHAPES: Record<SharkKind, SharkShape> = {
     gills: [0.14, 0.22],
     tint: [1.1, 0.96, 0.76],
   },
+  // Humpback: broad knobbly head, long pale flippers and a wide scalloped fluke.
+  humpback: {
+    halfWidth: (s) => {
+      if (s < 0.12) return 0.105 * Math.pow(Math.sin((s / 0.12) * Math.PI / 2), 0.48);
+      if (s < 0.35) return 0.105 + 0.014 * Math.sin(((s - 0.12) / 0.23) * Math.PI);
+      if (s < 0.87) return 0.017 + 0.088 * Math.pow(1 - (s - 0.35) / 0.52, 1.15);
+      return 0.017 * (1 - (s - 0.87) / 0.13);
+    },
+    pectoral: [0.26, 0.36, 0.55, 0.34],
+    falcate: false,
+    pelvic: [0, 0, 0, 0],
+    caudal: 0,
+    dorsal: [0.59, 0.65],
+    secondDorsal: [0, 0],
+    eye: [0.12, 0.17],
+    gills: [0, 0],
+    tint: [0.76, 0.88, 1.02],
+    whale: { flukeSpan: 0.22, flipperWidth: 0.043, paleFlippers: true },
+  },
+  // Blue whale: long U-shaped rostrum, slate-blue mottling and short swept flippers.
+  bluewhale: {
+    halfWidth: (s) => {
+      if (s < 0.15) return 0.075 * Math.pow(Math.sin((s / 0.15) * Math.PI / 2), 0.42);
+      if (s < 0.38) return 0.075 + 0.014 * Math.sin(((s - 0.15) / 0.23) * Math.PI);
+      if (s < 0.9) return 0.012 + 0.063 * Math.pow(1 - (s - 0.38) / 0.52, 1.1);
+      return 0.012 * (1 - (s - 0.9) / 0.1);
+    },
+    pectoral: [0.27, 0.32, 0.43, 0.185],
+    falcate: false,
+    pelvic: [0, 0, 0, 0],
+    caudal: 0,
+    dorsal: [0.73, 0.77],
+    secondDorsal: [0, 0],
+    eye: [0.14, 0.18],
+    gills: [0, 0],
+    tint: [0.59, 0.86, 1.16],
+    whale: { flukeSpan: 0.18, flipperWidth: 0.026, paleFlippers: false },
+  },
 };
 
-const KINDS = Object.keys(SHAPES) as SharkKind[];
+const KINDS = Object.keys(SHAPES) as OceanKind[];
 
 function inTriangle(
   px: number, py: number,
@@ -303,6 +342,7 @@ export class AsciiRenderer {
   private sharkId = 0;
   private finTipLeft = 0;
   private finTipRight = 0;
+  private flukeScale = 1;
   // Scratch outputs of sampleShark(), to avoid allocating per sample.
   private hitFlag = 0;
   private hitShade = 0;
@@ -423,7 +463,7 @@ export class AsciiRenderer {
 
     this.drawHeat();
     this.drawFish();
-    this.drawSharks(t);
+    this.drawSharks();
   }
 
   // ── simulation → field ──────────────────────────────────────────────
@@ -587,12 +627,48 @@ export class AsciiRenderer {
       } else if (this.marked(s, a * bestSign, L, across)) {
         flag = FLAG_MARK;
       }
+      if (shape.whale) {
+        // Paired blowholes, a rostral ridge, and texture anchored to the skin.
+        if (s > 0.17 && s < 0.21 && across > 0.1 && across < 0.32) {
+          flag = FLAG_EYE;
+          shade = 0.08;
+        } else if (shape === SHAPES.bluewhale && flag === FLAG_BODY) {
+          const mottle = Math.sin(s * 93 + Math.sin(this.hitV / L * 75)) * Math.cos(this.hitV / L * 113 + s * 31);
+          shade = clamp(shade + mottle * 0.17, 0.12, 0.9);
+          if (s < 0.17 && across < 0.13) shade += 0.17;
+        } else if (shape === SHAPES.humpback && s < 0.23 && flag === FLAG_BODY) {
+          const bumps = hash3(Math.floor(s * 65), Math.round(this.hitV / L * 70), this.sharkId);
+          if (bumps > 0.76) shade = 0.88;
+        }
+      }
       this.hitFlag = flag;
       this.hitShade = shade;
       return true;
     }
 
     const tip = bestSign > 0 ? this.finTipRight : this.finTipLeft;
+    if (shape.whale) {
+      // Rounded, swept flippers; humpbacks have exceptionally long white ones.
+      const q = a / tip;
+      const center = L * (shape.pectoral[0] + (shape.pectoral[2] - shape.pectoral[0]) * Math.pow(clamp(q, 0, 1), 1.2));
+      const half = L * shape.whale.flipperWidth * Math.pow(Math.sin(Math.PI * clamp(q, 0, 1)), 0.65);
+      if (q < 1 && Math.abs(u - center) < half) {
+        this.hitFlag = shape.whale.paleFlippers ? FLAG_PALE : FLAG_FIN;
+        this.hitShade = 0.6 + 0.25 * Math.sin(q * Math.PI);
+        return true;
+      }
+      // Two broad lobes with swept tips and a notch at the trailing centre.
+      const r = a / (L * shape.whale.flukeSpan * this.flukeScale);
+      const leading = L * (0.9 - 0.08 * Math.sin(Math.PI * r * 0.85) + 0.015 * r);
+      let trailing = L * (0.99 - 0.1 * r * r);
+      if (r < 0.12) trailing -= L * 0.04 * (1 - r / 0.12);
+      if (r <= 1 && u >= leading && u <= trailing) {
+        this.hitFlag = FLAG_FIN;
+        this.hitShade = 0.4 + 0.3 * (1 - r);
+        return true;
+      }
+      return false;
+    }
     const [p0, p1, p2] = shape.pectoral;
     if (
       inTriangle(u, a, L * p0, 0, L * p1, 0, L * p2, tip) &&
@@ -655,6 +731,8 @@ export class AsciiRenderer {
       const n = sh.nodes;
       const swim = clamp(sh.speed / 60, 0.4, 1.4);
       this.shape = SHAPES[sh.kind];
+      const whale = !!this.shape.whale;
+      this.flukeScale = whale ? 0.86 + 0.14 * Math.cos(sh.phase) : 1;
       this.sharkId = sh.id;
       const kindIndex = KINDS.indexOf(sh.kind);
 
@@ -668,10 +746,12 @@ export class AsciiRenderer {
         const tl = Math.hypot(tx, ty) || 1;
         tx /= tl;
         ty /= tl;
-        const amp = L * 0.05 * (0.1 + 0.9 * Math.pow(s, 1.8)) * swim;
-        const off = amp * Math.sin(sh.phase - s * 5.2);
-        spine[k * 2] = n[k * 2] - ty * off;
-        spine[k * 2 + 1] = n[k * 2 + 1] + tx * off;
+        // Whales pitch their tail vertically: show gentle axial foreshortening
+        // from above, instead of borrowing a shark's side-to-side tail beat.
+        const amp = L * (whale ? 0.012 : 0.05) * (0.1 + 0.9 * Math.pow(s, 1.8)) * swim;
+        const off = amp * Math.sin(sh.phase - s * (whale ? 2 : 5.2));
+        spine[k * 2] = n[k * 2] + (whale ? tx : -ty) * off;
+        spine[k * 2 + 1] = n[k * 2 + 1] + (whale ? ty : tx) * off;
       }
       arc[0] = 0;
       for (let k = 1; k < N; k++) {
@@ -698,7 +778,7 @@ export class AsciiRenderer {
         minY = Math.min(minY, spine[k * 2 + 1]);
         maxY = Math.max(maxY, spine[k * 2 + 1]);
       }
-      const reach = L * 0.36;
+      const reach = Math.max(L * 0.36, this.finTipLeft, this.finTipRight);
       const c0 = Math.max(0, Math.floor((minX - reach) / cw));
       const c1 = Math.min(cols - 1, Math.floor((maxX + reach) / cw));
       const r0 = Math.max(0, Math.floor((minY - reach) / ch));
@@ -750,7 +830,7 @@ export class AsciiRenderer {
     }
   }
 
-  private drawSharks(t: number) {
+  private drawSharks() {
     const { ctx, cols, rows, cw, ch, sharkFlag, sharkShade, sharkKey, sharkDepth, sharkKind } = this;
     const n = cols * rows;
     for (let i = 0; i < n; i++) {
@@ -763,20 +843,13 @@ export class AsciiRenderer {
       const key = sharkKey[i];
       const shade = sharkShade[i];
       const dim = 0.7 + 0.3 * sharkDepth[i];
-      const [tr, tg, tb] = SHAPES[KINDS[sharkKind[i]]].tint;
-
-      // Colours re-roll on a staggered clock so the hide shimmers.
-      const tick = Math.floor(t * 2.4 + (key % 997) / 97);
-      const roll = hash3(key, tick, 7);
+      const [tr, tg, tb] = flag === FLAG_PALE ? [0.94, 0.98, 1.04] : SHAPES[KINDS[sharkKind[i]]].tint;
 
       if (flag === FLAG_EDGE) {
         // Soft, anti-aliased silhouette: no block, just a light glyph.
         const set = shade >= 0.5 ? EDGE_HEAVY : EDGE_LIGHT;
         const g = (70 + shade * 80) * dim;
-        ctx.fillStyle =
-          roll < 0.07
-            ? ACCENTS[key % ACCENTS.length]
-            : `rgb(${Math.round(g * tr)},${Math.round(g * tg)},${Math.min(255, Math.round(g * tb + 6))})`;
+        ctx.fillStyle = `rgb(${Math.round(g * tr)},${Math.round(g * tg)},${Math.min(255, Math.round(g * tb + 6))})`;
         ctx.fillText(set[(key >>> 8) % set.length], x + cw / 2, y + ch / 2 + 1);
         continue;
       }
@@ -792,6 +865,9 @@ export class AsciiRenderer {
       } else if (flag === FLAG_MARK) {
         level = 24 + shade * 22;
         glyph = MARK_GLYPHS[(key >>> 8) % MARK_GLYPHS.length];
+      } else if (flag === FLAG_PALE) {
+        level = 178 + shade * 62;
+        glyph = ":;t%"[(key >>> 8) % 4];
       } else if (flag === FLAG_FIN) {
         level = 40 + shade * 120;
         glyph = FIN_GLYPHS[(key >>> 8) % FIN_GLYPHS.length];
@@ -808,8 +884,6 @@ export class AsciiRenderer {
       let color: string;
       if (flag === FLAG_EYE) color = "#9aa0ad";
       else if (flag === FLAG_MARK) color = `rgb(${Math.round(70 * tr)},${Math.round(70 * tg)},${Math.round(70 * tb)})`;
-      else if (roll < 0.09) color = ACCENTS[key % ACCENTS.length];
-      else if (roll < 0.13) color = "#ffffff";
       else color = shade > 0.55 ? "#0e0f13" : "#1b1d24";
       ctx.fillStyle = color;
       ctx.fillText(glyph, x + cw / 2, y + ch / 2 + 1);

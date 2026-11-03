@@ -4,6 +4,14 @@ import { World, type SharkSpec } from "./world";
 const STEP = 1 / 60;
 const MAX_STEPS = 4;
 
+export interface OceanEngineOptions {
+  /** Decorative backgrounds must not react to clicks in the UI above them. */
+  interactive?: boolean;
+  /** Optional render cap; the simulation retains its fixed 60 Hz time step. */
+  maxFps?: number;
+  maxDpr?: number;
+}
+
 /**
  * Wires World + AsciiRenderer to a canvas: fixed-timestep loop, resize,
  * pointer input, pausing off-screen, and prefers-reduced-motion.
@@ -20,7 +28,7 @@ export class OceanEngine {
   private intersectionObserver: IntersectionObserver;
   private disposed = false;
 
-  constructor(private canvas: HTMLCanvasElement, sharks?: SharkSpec[]) {
+  constructor(private canvas: HTMLCanvasElement, sharks?: SharkSpec[], private options: OceanEngineOptions = {}) {
     this.world = new World(sharks);
     this.renderer = new AsciiRenderer(canvas);
     this.renderer.setFontFamily(getComputedStyle(canvas).fontFamily);
@@ -35,10 +43,13 @@ export class OceanEngine {
     this.intersectionObserver.observe(canvas);
 
     this.reducedMotion.addEventListener("change", this.onMotionPreference);
-    window.addEventListener("pointermove", this.onPointerMove, { passive: true });
-    window.addEventListener("pointerdown", this.onPointerDown, { passive: true });
-    document.documentElement.addEventListener("pointerleave", this.onPointerLeave);
-    window.addEventListener("blur", this.onPointerLeave);
+    document.addEventListener("visibilitychange", this.scheduleOnVisibility);
+    if (this.options.interactive !== false) {
+      window.addEventListener("pointermove", this.onPointerMove, { passive: true });
+      window.addEventListener("pointerdown", this.onPointerDown, { passive: true });
+      document.documentElement.addEventListener("pointerleave", this.onPointerLeave);
+      window.addEventListener("blur", this.onPointerLeave);
+    }
 
     this.resize();
     // Canvas text can't trigger a webfont load; once the mono face is in, redraw.
@@ -54,6 +65,7 @@ export class OceanEngine {
     this.resizeObserver.disconnect();
     this.intersectionObserver.disconnect();
     this.reducedMotion.removeEventListener("change", this.onMotionPreference);
+    document.removeEventListener("visibilitychange", this.scheduleOnVisibility);
     window.removeEventListener("pointermove", this.onPointerMove);
     window.removeEventListener("pointerdown", this.onPointerDown);
     document.documentElement.removeEventListener("pointerleave", this.onPointerLeave);
@@ -63,7 +75,7 @@ export class OceanEngine {
   private resize() {
     const rect = this.canvas.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(window.devicePixelRatio || 1, this.options.maxDpr ?? 2);
     this.renderer.resize(rect.width, rect.height, dpr);
     this.world.resize(rect.width, rect.height, this.renderer.cellWidth, this.renderer.cellHeight);
     if (this.reducedMotion.matches) this.drawStill();
@@ -71,12 +83,18 @@ export class OceanEngine {
 
   private schedule() {
     cancelAnimationFrame(this.raf);
-    if (this.disposed || !this.visible || this.reducedMotion.matches) return;
+    if (this.disposed || !this.visible || document.hidden || this.reducedMotion.matches) return;
     this.last = performance.now();
     this.raf = requestAnimationFrame(this.frame);
   }
 
+  private scheduleOnVisibility = () => this.schedule();
+
   private frame = (now: number) => {
+    if (this.options.maxFps && now - this.last < 1000 / this.options.maxFps - 0.5) {
+      this.raf = requestAnimationFrame(this.frame);
+      return;
+    }
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     this.acc += dt;

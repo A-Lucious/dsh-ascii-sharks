@@ -20,8 +20,15 @@ export const SHARK_NODES = 20;
 
 export type SharkKind = "classic" | "hammerhead" | "zebra" | "tiger" | "greathammer" | "mako" | "thresher" | "nurse";
 
-/** Which sharks to put in the water; size is relative to the biggest. */
-export type SharkSpec = { kind: SharkKind; size: number };
+export type WhaleKind = "humpback" | "bluewhale";
+export type OceanKind = SharkKind | WhaleKind;
+
+export function isWhale(kind: OceanKind): kind is WhaleKind {
+  return kind === "humpback" || kind === "bluewhale";
+}
+
+/** Ocean residents. The original SharkSpec name remains compatible; size is relative. */
+export type SharkSpec = { kind: OceanKind; size: number };
 
 // The landing hero: four of the same shark at different depths.
 const DEFAULT_SHARKS: SharkSpec[] = [
@@ -53,7 +60,7 @@ export interface Fish {
 
 export interface Shark {
   id: number;
-  kind: SharkKind;
+  kind: OceanKind;
   length: number;
   /** Spine positions, snout first: [x0, y0, x1, y1, ...]. */
   nodes: Float32Array;
@@ -116,6 +123,8 @@ export class World {
 
   resize(width: number, height: number, cellW: number, cellH: number) {
     const first = this.width === 0;
+    const previousWidth = this.width;
+    const previousHeight = this.height;
     this.width = width;
     this.height = height;
     // Spacing is set in grid cells so every fish lands in its own cell.
@@ -132,6 +141,25 @@ export class World {
       f.x = clamp(f.x, 0, width);
       f.y = clamp(f.y, 0, height);
     }
+    // Keep whales visible when a desktop canvas becomes a narrow sidebar.
+    const minSide = Math.min(width, height);
+    for (const sh of this.sharks) {
+      if (!isWhale(sh.kind) || (previousWidth === width && previousHeight === height)) continue;
+      const nextLength = Math.min(clamp(minSide * 0.44, 170, 430) * this.sharkSpecs[sh.id - 1].size, minSide * 0.82);
+      const ratio = nextLength / sh.length;
+      const hx = sh.nodes[0];
+      const hy = sh.nodes[1];
+      const dx = Math.cos(sh.heading) * 0.45;
+      const dy = Math.sin(sh.heading) * 0.45;
+      const x = clamp((hx - dx * sh.length) * width / previousWidth, nextLength * 0.5, width - nextLength * 0.5) + dx * nextLength;
+      const y = clamp((hy - dy * sh.length) * height / previousHeight, nextLength * 0.5, height - nextLength * 0.5) + dy * nextLength;
+      for (let k = 0; k < SHARK_NODES; k++) {
+        sh.nodes[k * 2] = x + (sh.nodes[k * 2] - hx) * ratio;
+        sh.nodes[k * 2 + 1] = y + (sh.nodes[k * 2 + 1] - hy) * ratio;
+      }
+      sh.length = nextLength;
+      sh.orbitRadius = minSide * 0.34;
+    }
   }
 
   seed() {
@@ -143,13 +171,17 @@ export class World {
     this.sharks = [];
     for (let i = 0; i < sharkCount; i++) {
       const { kind, size } = this.sharkSpecs[i];
-      const length = baseLength * size;
+      // Whales are visibly larger, but still fit the shortest viewport dimension.
+      const length = isWhale(kind)
+        ? Math.min(baseLength * size, minSide * 0.82)
+        : baseLength * size;
       const orbitRadius = minSide * rand(0.28, 0.4);
       const a = (i / sharkCount) * TAU + rand(-0.4, 0.4);
       const orbitDir: 1 | -1 = i % 2 === 0 ? 1 : -1;
-      const x = W / 2 + Math.cos(a) * orbitRadius * (W / minSide) * 0.9;
-      const y = H / 2 + Math.sin(a) * orbitRadius;
-      const heading = a + (orbitDir * Math.PI) / 2;
+      const whale = isWhale(kind);
+      const heading = whale ? (kind === "bluewhale" ? Math.PI : 0) : a + (orbitDir * Math.PI) / 2;
+      const x = whale ? W / 2 + Math.cos(heading) * length * 0.45 : W / 2 + Math.cos(a) * orbitRadius * (W / minSide) * 0.9;
+      const y = whale ? H * (sharkCount === 1 ? 0.48 : kind === "bluewhale" ? 0.28 : 0.67) : H / 2 + Math.sin(a) * orbitRadius;
       const nodes = new Float32Array(SHARK_NODES * 2);
       const seg = length / (SHARK_NODES - 1);
       for (let n = 0; n < SHARK_NODES; n++) {
@@ -171,7 +203,7 @@ export class World {
         orbitRadius,
         target: null,
         retargetAt: 0,
-        depth: size,
+        depth: whale ? clamp(size, 0.55, 1) : size,
       });
     }
     // Smaller (farther) sharks draw first so the big one swims over them.
@@ -467,20 +499,21 @@ export class World {
       const nodes = sh.nodes;
       const hx = nodes[0];
       const hy = nodes[1];
+      const whale = isWhale(sh.kind);
 
-      sh.hunger = Math.min(1, sh.hunger + dt * 0.03);
+      sh.hunger = whale ? 0 : Math.min(1, sh.hunger + dt * 0.03);
 
       // Momentum.
       let dx = Math.cos(sh.heading);
       let dy = Math.sin(sh.heading);
 
       // Wander: a slowly drifting offset on a circle ahead of the snout.
-      sh.wander = clamp(sh.wander + (Math.random() - 0.5) * dt * 3.2, -1.1, 1.1);
+      sh.wander = clamp(sh.wander + (Math.random() - 0.5) * dt * (whale ? 0.6 : 3.2), -1.1, 1.1);
       dx += Math.cos(sh.heading + sh.wander) * 0.45;
       dy += Math.sin(sh.heading + sh.wander) * 0.45;
 
-      // Hunt.
-      if (time >= sh.retargetAt) {
+      // Baleen whales cruise rather than inheriting the sharks' prey chase.
+      if (!whale && time >= sh.retargetAt) {
         sh.target = this.findPrey(sh);
         sh.retargetAt = time + 0.45;
       }
@@ -549,16 +582,16 @@ export class World {
 
       const desired = Math.atan2(dy, dx);
       // Sharks can't pivot on the spot: the turning circle grows with speed.
-      const agility = Math.min(hunting ? 1.7 + closing : 0.8, sh.speed / (L * 0.22));
+      const agility = Math.min(whale ? 0.32 : hunting ? 1.7 + closing : 0.8, sh.speed / (L * (whale ? 0.32 : 0.22)));
       const maxTurn = agility * dt;
       const turned = clamp(angleDiff(sh.heading, desired), -maxTurn, maxTurn);
       sh.heading += turned;
       sh.turn += (turned / dt - sh.turn) * Math.min(1, dt * 3);
 
-      const cruise = 30 + L * 0.04;
+      const cruise = whale ? 18 + L * 0.025 : 30 + L * 0.04;
       const targetSpeed = hunting ? cruise * (1.45 + closing * 1.5) : cruise;
-      sh.speed += (targetSpeed - sh.speed) * Math.min(1, dt * 1.1);
-      sh.phase += dt * (2 + sh.speed / 24);
+      sh.speed += (targetSpeed - sh.speed) * Math.min(1, dt * (whale ? 0.55 : 1.1));
+      sh.phase += dt * (whale ? 0.8 + sh.speed / 60 : 2 + sh.speed / 24);
 
       nodes[0] += Math.cos(sh.heading) * sh.speed * dt;
       nodes[1] += Math.sin(sh.heading) * sh.speed * dt;
@@ -566,7 +599,7 @@ export class World {
       // Follow-the-leader spine, with a stiffness limit per joint so the
       // body bends into a C at most and never folds back on itself.
       const seg = L / (SHARK_NODES - 1);
-      const maxBend = 0.16;
+      const maxBend = whale ? 0.09 : 0.16;
       let prevAngle = sh.heading + Math.PI;
       for (let k = 1; k < SHARK_NODES; k++) {
         const px = nodes[(k - 1) * 2];
@@ -579,7 +612,7 @@ export class World {
       }
 
       // Feed.
-      if (sh.hunger > 0.15) {
+      if (!whale && sh.hunger > 0.15) {
         const mouthR = L * 0.05 + 8;
         const mx = nodes[0];
         const my = nodes[1];
